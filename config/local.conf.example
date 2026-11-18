@@ -1,0 +1,13 @@
+# Copy to ~/.config/kali-virtual-security-lab/config.conf and edit as needed.
+# Do not put passwords, tokens, or private keys in this file.
+# Supported values are plain KEY=value pairs; shell syntax is not evaluated.
+# Select a resource profile explicitly with: ./kali.sh --profile minimal|standard|advanced COMMAND
+# NETWORK_MODE=OFFLINE
+# MEMORY=3G
+# CPU_CORES=2
+# DISK_PATH and VNC_PASSWORD_FILE accept filenames only; absolute paths and directories are rejected.
+# DISK_PATH=disk.qcow2
+# VNC_PASSWORD_FILE=vnc-password.txt
+# SSH_HOST_PORT=auto
+# VNC_DISPLAY=auto
+# DISK_SIZE=80G
