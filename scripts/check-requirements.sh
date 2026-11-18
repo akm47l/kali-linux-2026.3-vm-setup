@@ -30,13 +30,25 @@ if ! kali_choose_accelerator; then FAIL=1; else printf 'Selected acceleration: %
 if ! kali_resolve_ports; then FAIL=1; else printf 'Loopback ports (selected for this user): VNC %s, SSH %s\n' "$((5900 + RESOLVED_VNC_DISPLAY))" "$RESOLVED_SSH_HOST_PORT"; fi
 DISK="$(kali_disk_path)"
 if [[ -e "$DISK" ]]; then
-  if kali_validate_qcow2 "$DISK"; then
-    if [[ -z "$(kali_active_sessions)" ]]; then
-      if "$(kali_qemu_img_binary)" check -f qcow2 -- "$DISK"; then printf 'OK: QCOW2 integrity check\n'; else printf 'FAIL: QCOW2 integrity check\n'; FAIL=1; fi
+  if kali_require_vm_stopped --quiet; then
+    if kali_validate_qcow2 "$DISK"; then
+      if "$(kali_qemu_img_binary)" check -f qcow2 -- "$DISK"; then
+        printf 'OK: QCOW2 integrity check\n'
+      else
+        printf 'FAIL: QCOW2 integrity check\n'
+        FAIL=1
+      fi
     else
-      printf 'SKIP: disk integrity check while this user has an active VM\n'
+      FAIL=1
     fi
-  else FAIL=1; fi
+  else
+    LOCK_RESULT=$?
+    if (( LOCK_RESULT == 2 )); then
+      printf 'SKIP: QCOW2 integrity check while this user has an active VM or disk operation\n'
+    else
+      FAIL=1
+    fi
+  fi
 else
   printf 'INFO: no per-user disk yet (%s); ./kali.sh install creates a new one\n' "$DISK"
 fi

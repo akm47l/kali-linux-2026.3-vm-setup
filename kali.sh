@@ -17,7 +17,7 @@ Commands:
   restore       Restore a snapshot after explicit confirmation and a backup
   backup        Create a private, verified backup of the stopped QCOW2 disk
   check         Check dependencies, private-file permissions, resources, and disk integrity
-  create-disk   Create a new sparse QCOW2 disk without replacing existing data
+  create-disk   Create a sparse QCOW2 disk; optional --output accepts a filename only
   help          Show this help
 
 Each Linux user has private config, VM data, runtime state, QMP sockets, and auto-selected loopback ports.

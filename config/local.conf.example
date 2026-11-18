@@ -5,6 +5,7 @@
 # NETWORK_MODE=OFFLINE
 # MEMORY=3G
 # CPU_CORES=2
+# DISK_PATH and VNC_PASSWORD_FILE accept filenames only; absolute paths and directories are rejected.
 # DISK_PATH=disk.qcow2
 # VNC_PASSWORD_FILE=vnc-password.txt
 # SSH_HOST_PORT=auto

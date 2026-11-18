@@ -30,6 +30,7 @@ command -v "$QEMU_IMG" >/dev/null 2>&1 || { kali_die "qemu-img executable not fo
 command -v flock >/dev/null 2>&1 || { kali_die 'flock is required.'; exit 1; }
 command -v python3 >/dev/null 2>&1 || { kali_die 'Python 3 is required.'; exit 1; }
 
+kali_acquire_vm_lock
 DISK="$(kali_disk_path)"
 PASSWORD_FILE="$(kali_password_path)"
 kali_validate_qcow2 "$DISK"
@@ -41,18 +42,6 @@ fi
 kali_resolve_resources
 kali_choose_accelerator
 kali_resolve_ports
-kali_ensure_private_runtime
-
-LOCK_FILE="$KALI_RUNTIME_DIR/vm.lock"
-[[ ! -L "$LOCK_FILE" ]] || { kali_die 'Refusing a symlink at the per-user VM lock path.'; exit 1; }
-if [[ -e "$LOCK_FILE" ]]; then
-  kali_validate_private_file "$LOCK_FILE" || exit 1
-else
-  (set -o noclobber; : > "$LOCK_FILE") 2>/dev/null || { kali_die 'Could not safely create the per-user VM lock.'; exit 1; }
-  chmod 600 -- "$LOCK_FILE"
-fi
-exec 9>>"$LOCK_FILE"
-flock -n 9 || { kali_die 'A VM session is already being started or managed by this user.'; exit 1; }
 ACTIVE="$(kali_active_sessions)"
 [[ -z "$ACTIVE" ]] || { kali_die 'This user already has an active VM session; run ./kali.sh status.'; exit 1; }
 

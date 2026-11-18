@@ -71,7 +71,8 @@ kali_load_config() {
 
 kali_validate_config() {
   [[ "$VM_NAME" =~ ^[A-Za-z0-9_.-]{1,64}$ ]] || { kali_die 'VM_NAME must use 1-64 letters, digits, dots, underscores, or hyphens.'; return 1; }
-  [[ -n "$DISK_PATH" && -n "$VNC_PASSWORD_FILE" ]] || { kali_die 'DISK_PATH and VNC_PASSWORD_FILE must not be empty.'; return 1; }
+  [[ "$DISK_PATH" =~ ^[A-Za-z0-9_.-]{1,128}$ && "$DISK_PATH" != . && "$DISK_PATH" != .. ]] || { kali_die "DISK_PATH must be a simple filename in this user's private data directory; absolute paths and path separators are not allowed."; return 1; }
+  [[ "$VNC_PASSWORD_FILE" =~ ^[A-Za-z0-9_.-]{1,128}$ && "$VNC_PASSWORD_FILE" != . && "$VNC_PASSWORD_FILE" != .. ]] || { kali_die "VNC_PASSWORD_FILE must be a simple filename in this user's private config directory; absolute paths and path separators are not allowed."; return 1; }
   [[ "$MEMORY" == auto || "$MEMORY" =~ ^[1-9][0-9]*[KMG]$ ]] || { kali_die 'MEMORY must be auto or a positive integer followed by K, M, or G.'; return 1; }
   [[ "$CPU_CORES" == auto || "$CPU_CORES" =~ ^[1-9][0-9]*$ ]] || { kali_die 'CPU_CORES must be auto or a positive integer.'; return 1; }
   [[ "$ACCELERATION" =~ ^(auto|kvm|tcg)$ ]] || { kali_die 'ACCELERATION must be auto, kvm, or tcg.'; return 1; }
@@ -172,8 +173,8 @@ kali_resolve_ports() {
 
 kali_qemu_binary() { printf '%s\n' "${QEMU_SYSTEM:-qemu-system-x86_64}"; }
 kali_qemu_img_binary() { printf '%s\n' "${QEMU_IMG:-qemu-img}"; }
-kali_disk_path() { if [[ "$DISK_PATH" = /* ]]; then printf '%s\n' "$DISK_PATH"; else printf '%s/%s\n' "$KALI_DATA_HOME" "$DISK_PATH"; fi; }
-kali_password_path() { if [[ "$VNC_PASSWORD_FILE" = /* ]]; then printf '%s\n' "$VNC_PASSWORD_FILE"; else printf '%s/%s\n' "$KALI_CONFIG_HOME" "$VNC_PASSWORD_FILE"; fi; }
+kali_disk_path() { printf '%s/%s\n' "$KALI_DATA_HOME" "$DISK_PATH"; }
+kali_password_path() { printf '%s/%s\n' "$KALI_CONFIG_HOME" "$VNC_PASSWORD_FILE"; }
 kali_path_owner_is_current() { [[ "$(stat -c '%u' -- "$1" 2>/dev/null || true)" == "$(id -u)" ]]; }
 
 kali_ensure_private_dir() {
@@ -211,6 +212,43 @@ kali_validate_private_file() {
     kali_die "File is not private to this user: $file (mode ${mode:-unknown}); run chmod 600 '$file'."
     return 1
   fi
+}
+
+kali_acquire_vm_lock() {
+  local lock_file="$KALI_RUNTIME_DIR/vm.lock" expected fd_path quiet=0
+  [[ "${1:-}" == --quiet ]] && quiet=1
+  command -v flock >/dev/null 2>&1 || { kali_die 'flock is required for VM and disk-operation locking.'; return 1; }
+  kali_prepare_user_dirs || return 1
+  umask 077
+  [[ ! -L "$lock_file" ]] || { kali_die 'Refusing a symlink at the per-user VM lock path.'; return 1; }
+  if [[ ! -e "$lock_file" ]]; then
+    if (set -o noclobber; : > "$lock_file") 2>/dev/null; then chmod 600 -- "$lock_file" || { kali_die 'Could not protect the per-user VM lock file.'; return 1; }; fi
+  fi
+  [[ -f "$lock_file" && ! -L "$lock_file" ]] || { kali_die 'Per-user VM lock is not a regular file.'; return 1; }
+  kali_validate_private_file "$lock_file" || return 1
+  expected="$(readlink -f -- "$lock_file" 2>/dev/null)" || { kali_die 'Could not resolve the per-user VM lock path.'; return 1; }
+  fd_path="$(readlink -f -- "/proc/$BASHPID/fd/9" 2>/dev/null || true)"
+  if [[ "$fd_path" != "$expected" ]]; then
+    exec 9>>"$lock_file" || { kali_die 'Could not open the per-user VM lock file.'; return 1; }
+  fi
+  kali_lock_fd_matches_path "$lock_file" || { kali_die 'The per-user VM lock path changed while it was being opened.'; return 1; }
+  kali_validate_private_file "$lock_file" || return 1
+  if flock -n 9; then
+    kali_lock_fd_matches_path "$lock_file" || { kali_die 'The per-user VM lock path changed while acquiring the lock.'; return 1; }
+    kali_validate_private_file "$lock_file" || return 1
+    return 0
+  fi
+  if (( quiet )); then return 2; fi
+  kali_die 'A VM start or disk operation is already in progress for this Linux user.'
+  return 1
+}
+
+kali_lock_fd_matches_path() {
+  local lock_file="$1" path_identity fd_identity
+  [[ -f "$lock_file" && ! -L "$lock_file" ]] || return 1
+  path_identity="$(stat -Lc '%d:%i:%u:%a' -- "$lock_file" 2>/dev/null)" || return 1
+  fd_identity="$(stat -Lc '%d:%i:%u:%a' -- "/proc/$BASHPID/fd/9" 2>/dev/null)" || return 1
+  [[ "$path_identity" == "$fd_identity" ]]
 }
 
 kali_validate_vnc_password_file() {
@@ -351,9 +389,14 @@ kali_validate_qcow2() {
 }
 
 kali_require_vm_stopped() {
-  local active
+  local active quiet=0
+  [[ "${1:-}" == --quiet ]] && quiet=1
+  kali_acquire_vm_lock "${1:-}" || return $?
   active="$(kali_active_sessions)"
-  [[ -z "$active" ]] || { kali_die "This operation requires the current user's Kali VM to be fully stopped."; return 1; }
+  [[ -z "$active" ]] && return 0
+  if (( quiet )); then return 2; fi
+  kali_die "This operation requires the current user's Kali VM to be fully stopped."
+  return 1
 }
 
 kali_ensure_private_runtime() { kali_prepare_user_dirs; }

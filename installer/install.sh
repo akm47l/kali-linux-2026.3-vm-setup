@@ -7,6 +7,7 @@ source "$SCRIPT_DIR/../scripts/lib/common.sh"
 kali_load_config
 umask 077
 kali_prepare_user_dirs
+kali_require_vm_stopped ""
 DISK="$(kali_disk_path)"
 if [[ -e "$DISK" || -L "$DISK" ]]; then
   kali_die "Install will not replace an existing disk. Change DISK_PATH in your private config to create a separate blank disk: $DISK"
@@ -19,7 +20,7 @@ for cmd in curl gpg gpgv sha256sum qemu-system-x86_64 qemu-img; do command -v "$
 ISO="$KALI_DATA_HOME/installer/kali-linux-${INSTALLER_RELEASE}-installer-amd64.iso"
 [[ -f "$ISO" ]] || { kali_die 'Verified installer ISO is missing after download verification.'; exit 1; }
 # The configured size is a maximum sparse capacity; available host space is checked before creation.
-"$SCRIPT_DIR/../scripts/create-disk.sh" --size "$DISK_SIZE" --output "$DISK"
+"$SCRIPT_DIR/../scripts/create-disk.sh" --size "$DISK_SIZE"
 printf '\nStarting the interactive installer. Use the VNC viewer at 127.0.0.1 on the selected port shown below; no guest is preinstalled.\n'
 "$SCRIPT_DIR/../scripts/start-kali.sh" --installer "$ISO"
 printf "\nInstaller session ended. The ISO and new disk remain in this user's private data directory; no image is uploaded to GitHub.\n"

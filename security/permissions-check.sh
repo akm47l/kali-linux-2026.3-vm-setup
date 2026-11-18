@@ -14,7 +14,16 @@ for dir in "$KALI_CONFIG_HOME" "$KALI_DATA_HOME" "$KALI_RUNTIME_DIR"; do
   fi
 done
 DISK="$(kali_disk_path)"
-if [[ -e "$DISK" ]]; then if kali_validate_qcow2 "$DISK"; then printf 'OK: private QCOW2 disk\n'; else FAIL=1; fi; else printf 'INFO: per-user disk does not exist yet\n'; fi
+if [[ -e "$DISK" ]]; then
+  if kali_require_vm_stopped --quiet; then
+    if kali_validate_qcow2 "$DISK"; then printf 'OK: private QCOW2 disk\n'; else FAIL=1; fi
+  else
+    LOCK_RESULT=$?
+    if (( LOCK_RESULT == 2 )); then
+      if kali_validate_private_file "$DISK"; then printf 'OK: private disk file; SKIP QCOW2 format check while the shared lock is held\n'; else FAIL=1; fi
+    else FAIL=1; fi
+  fi
+else printf 'INFO: per-user disk does not exist yet\n'; fi
 PASSWORD="$(kali_password_path)"
 if [[ -e "$PASSWORD" ]]; then if kali_validate_vnc_password_file "$PASSWORD"; then printf 'OK: private VNC password file (value not displayed)\n'; else FAIL=1; fi; else printf 'INFO: VNC password file does not exist yet\n'; fi
 (( FAIL == 0 )) || exit 1

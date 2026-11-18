@@ -29,6 +29,20 @@ if kali_read_config_file "$TEMP/unknown.conf" test >/dev/null 2>&1; then fail 'u
 printf 'PROFILE=advanced\n' > "$TEMP/profile.conf"
 if kali_read_config_file "$TEMP/profile.conf" user >/dev/null 2>&1; then fail 'profile must be selected through --profile'; fi
 
+kali_set_defaults
+for bad_path in ../escape.qcow2 /tmp/escape.qcow2 nested/escape.qcow2; do
+  DISK_PATH="$bad_path"
+  if kali_validate_config >/dev/null 2>&1; then fail "unsafe DISK_PATH accepted: $bad_path"; fi
+  kali_set_defaults
+  VNC_PASSWORD_FILE="$bad_path"
+  if kali_validate_config >/dev/null 2>&1; then fail "unsafe VNC_PASSWORD_FILE accepted: $bad_path"; fi
+  kali_set_defaults
+done
+KALI_DATA_HOME="$TEMP/private-data"
+KALI_CONFIG_HOME="$TEMP/private-config"
+[[ "$(kali_disk_path)" == "$TEMP/private-data/disk.qcow2" ]] || fail 'disk path stays under the per-user data directory'
+[[ "$(kali_password_path)" == "$TEMP/private-config/vnc-password.txt" ]] || fail 'VNC password stays under the per-user config directory'
+
 ARGS=()
 NETWORK_MODE=OFFLINE
 kali_build_network_args OFFLINE ARGS "$TEMP/net.sock"

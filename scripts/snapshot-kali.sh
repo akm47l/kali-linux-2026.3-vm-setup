@@ -8,7 +8,7 @@ if (($#)); then shift; fi
 kali_load_config
 umask 077
 kali_prepare_user_dirs
-kali_require_vm_stopped
+kali_require_vm_stopped ""
 DISK="$(kali_disk_path)"
 kali_validate_qcow2 "$DISK"
 case "$ACTION" in
