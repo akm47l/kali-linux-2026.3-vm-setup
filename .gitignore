@@ -1,20 +1,38 @@
-# VM disks and installer images
-*.qcow2
+# Never commit VM disks, installer media, exports, or backups
 *.qcow
+*.qcow2
+*.qcow2.backup-*
+*.qcow.backup-*
 *.img
+*.img.backup-*
 *.raw
 *.iso
-/installer/
+*.vmdk
+*.vdi
+*.vhd
+*.vhdx
+*.ova
+*.ovf
 
-# Local credentials and secrets
-/credentials.txt
-/vnc-password.txt
+# Local data, installer downloads, runtime state, and per-user config
+/artifacts/
+/runtime/
+/config/local.conf
+
+# Credentials and private material
+/vnc-password*
+/credentials*
 .env
 .env.*
 *.pem
 *.key
 
-# Runtime output
+# QEMU and test runtime output
 *.log
 *.pid
 *.sock
+*.lock
+*.tmp
+*.tmp.*
+__pycache__/
+.pytest_cache/
