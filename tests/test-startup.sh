@@ -112,4 +112,51 @@ grep -q '"status"' "$TEMP/status.log" || { cat "$TEMP/status.log" >&2; printf 'F
 wait "$START_PID" || true
 START_PID=""
 [[ -z "$(find "$TEMP/runtime/kali-virtual-security-lab/sessions" -mindepth 1 -maxdepth 1 -type d -name 'session-*' -print -quit)" ]] || { printf 'FAIL: session runtime was not cleaned\n' >&2; exit 1; }
-printf 'PASS: confined per-user paths, mutual start/disk locking, QEMU TCG startup, QMP/VNC setup, blocked concurrent qemu-img operations, status, stop, and cleanup\n'
+
+# Simulate the old launcher cleanup still holding vm.lock after stop reports no active QEMU.
+(
+  # shellcheck source=../scripts/lib/common.sh
+  source "$ROOT/scripts/lib/common.sh"
+  kali_load_config
+  umask 077
+  kali_prepare_user_dirs
+  kali_acquire_vm_lock
+  : > "$TEMP/restart-lock-ready"
+  sleep 2
+) &
+# shellcheck disable=SC2031 # Bash reports the PID of the background job in this parent shell.
+LOCK_HOLDER_PID=$!
+for _ in $(seq 1 50); do
+  [[ -f "$TEMP/restart-lock-ready" ]] && break
+  kill -0 "$LOCK_HOLDER_PID" 2>/dev/null || { printf 'FAIL: restart lock holder exited early\n' >&2; exit 1; }
+  sleep 0.1
+done
+[[ -f "$TEMP/restart-lock-ready" ]] || { printf 'FAIL: restart lock holder did not become ready\n' >&2; exit 1; }
+"$ROOT/scripts/restart-kali.sh" --force > "$TEMP/restart.log" 2>&1 &
+# shellcheck disable=SC2031 # Bash reports the PID of the background job in this parent shell.
+START_PID=$!
+sleep 0.2
+if grep -q 'A VM start or disk operation is already in progress' "$TEMP/restart.log"; then
+  cat "$TEMP/restart.log" >&2
+  printf 'FAIL: restart tried to start before the previous launcher released vm.lock\n' >&2
+  exit 1
+fi
+wait "$LOCK_HOLDER_PID"
+LOCK_HOLDER_PID=""
+READY=0
+for _ in $(seq 1 120); do
+  if grep -q 'VNC is bound only' "$TEMP/restart.log" 2>/dev/null; then READY=1; break; fi
+  if ! kill -0 "$START_PID" 2>/dev/null; then cat "$TEMP/restart.log" >&2; printf 'FAIL: restart exited before the new QEMU became ready\n' >&2; exit 1; fi
+  sleep 0.1
+done
+(( READY == 1 )) || { cat "$TEMP/restart.log" >&2; printf 'FAIL: restart did not launch QEMU after vm.lock was released\n' >&2; exit 1; }
+SESSION_DIR="$(find "$TEMP/runtime/kali-virtual-security-lab/sessions" -mindepth 1 -maxdepth 1 -type d -name 'session-*' -print -quit)"
+[[ -n "$SESSION_DIR" ]] || { printf 'FAIL: restarted session directory missing\n' >&2; exit 1; }
+QEMU_PID="$(cat "$SESSION_DIR/qemu.pid")"
+LOCK_FD_PATH="$(readlink -f -- "/proc/$QEMU_PID/fd/9" 2>/dev/null || true)"
+[[ "$LOCK_FD_PATH" == "$(readlink -f -- "$LOCK_FILE")" ]] || { printf 'FAIL: restarted QEMU did not inherit vm.lock on FD 9\n' >&2; exit 1; }
+"$ROOT/scripts/stop-kali.sh" --force > "$TEMP/restart-stop.log"
+wait "$START_PID" || true
+START_PID=""
+[[ -z "$(find "$TEMP/runtime/kali-virtual-security-lab/sessions" -mindepth 1 -maxdepth 1 -type d -name 'session-*' -print -quit)" ]] || { printf 'FAIL: restarted session runtime was not cleaned\n' >&2; exit 1; }
+printf 'PASS: confined per-user paths, mutual start/disk locking, QEMU TCG startup, restart lock handoff, QMP/VNC setup, blocked concurrent qemu-img operations, status, stop, and cleanup\n'

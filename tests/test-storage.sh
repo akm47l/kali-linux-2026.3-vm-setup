@@ -2,7 +2,9 @@
 set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 QEMU_IMG="${QEMU_IMG:-qemu-img}"
+QEMU_IO="${QEMU_IO:-qemu-io}"
 command -v "$QEMU_IMG" >/dev/null 2>&1 || { printf 'SKIP: qemu-img not installed\n'; exit 0; }
+command -v "$QEMU_IO" >/dev/null 2>&1 || { printf 'SKIP: qemu-io not installed; content verification requires qemu-utils\n'; exit 0; }
 TEMP="$(mktemp -d)"
 chmod 700 "$TEMP"
 trap 'rm -rf -- "$TEMP"' EXIT
@@ -41,6 +43,7 @@ done
 AFTER="$(sha256sum "$DISK" | awk '{print $1}')"
 [[ "$BEFORE" == "$AFTER" ]] || { printf 'FAIL: existing disk changed\n' >&2; exit 1; }
 
+"$QEMU_IO" -f qcow2 -c 'write -P 0x11 0 4096' "$DISK" >/dev/null
 "$ROOT/scripts/snapshot-kali.sh" create before-update >/dev/null
 [[ -f "$DATA_DIR/snapshots.tsv" ]] || { printf 'FAIL: snapshot creation log is missing\n' >&2; exit 1; }
 [[ "$(stat -c '%a' "$DATA_DIR/snapshots.tsv")" == 600 ]] || { printf 'FAIL: snapshot log is not private\n' >&2; exit 1; }
@@ -52,13 +55,34 @@ fi
 "$ROOT/scripts/backup-kali.sh" > "$TEMP/backup.log"
 BACKUP="$(sed -n 's/^Created verified private backup: //p' "$TEMP/backup.log")"
 [[ -n "$BACKUP" && -f "$BACKUP" && "$(stat -c '%a' "$BACKUP")" == 600 ]] || { printf 'FAIL: verified private backup missing or not protected\n' >&2; exit 1; }
+cmp -s -- "$DISK" "$BACKUP" || { printf 'FAIL: safety backup is not a byte-for-byte copy of the source disk\n' >&2; exit 1; }
+"$QEMU_IMG" compare -f qcow2 -F qcow2 "$DISK" "$BACKUP" >/dev/null
+"$QEMU_IO" -f qcow2 -c 'read -P 0x11 0 4096' "$BACKUP" >/dev/null
+
+# Change guest-visible data after the snapshot. Restore must roll it back, while its safety backup retains it.
+"$QEMU_IO" -f qcow2 -c 'write -P 0x22 0 4096' "$DISK" >/dev/null
+"$QEMU_IO" -f qcow2 -c 'read -P 0x22 0 4096' "$DISK" >/dev/null
+if "$QEMU_IO" -f qcow2 -c 'read -P 0x11 0 4096' "$DISK" >/dev/null 2>&1; then
+  printf 'FAIL: changed disk still contains the pre-snapshot test pattern\n' >&2; exit 1
+fi
+if "$QEMU_IMG" compare -f qcow2 -F qcow2 "$DISK" "$BACKUP" >/dev/null 2>&1; then
+  printf 'FAIL: qemu-img compare did not detect changed guest data\n' >&2; exit 1
+fi
 
 if command -v script >/dev/null 2>&1; then
   printf 'RESTORE before-update\r' | script -qefc "$ROOT/scripts/restore-kali.sh before-update" "$TEMP/restore.typescript" > "$TEMP/restore.log"
   grep -q 'pre-restore backup was retained' "$TEMP/restore.log" || { cat "$TEMP/restore.log" >&2; printf 'FAIL: confirmed snapshot restore did not complete\n' >&2; exit 1; }
   BACKUP_COUNT="$(find "$DATA_DIR" -maxdepth 1 -type f -name 'test.qcow2.backup-*' | wc -l)"
   (( BACKUP_COUNT >= 2 )) || { printf 'FAIL: restore did not preserve its pre-change backup\n' >&2; exit 1; }
+  PRE_RESTORE_BACKUP="$(find "$DATA_DIR" -maxdepth 1 -type f -name 'test.qcow2.backup-*' -print | grep -Fvx -- "$BACKUP" | head -n1)"
+  [[ -n "$PRE_RESTORE_BACKUP" && -f "$PRE_RESTORE_BACKUP" ]] || { printf 'FAIL: pre-restore backup could not be identified\n' >&2; exit 1; }
+  "$QEMU_IO" -f qcow2 -c 'read -P 0x22 0 4096' "$PRE_RESTORE_BACKUP" >/dev/null
+  "$QEMU_IMG" compare -f qcow2 -F qcow2 "$DISK" "$BACKUP" >/dev/null || { printf 'FAIL: restored disk does not match the pre-change backup contents\n' >&2; exit 1; }
+  "$QEMU_IO" -f qcow2 -c 'read -P 0x11 0 4096' "$DISK" >/dev/null
+  if "$QEMU_IO" -f qcow2 -c 'read -P 0x22 0 4096' "$DISK" >/dev/null 2>&1; then
+    printf 'FAIL: restore retained data written after the snapshot\n' >&2; exit 1
+  fi
 else
   printf 'SKIP: script(1) unavailable; restore confirmation path not exercised\n'
 fi
-printf 'PASS: confined paths, locked QCOW2 creation/snapshots/backups, no-overwrite, and confirmed restore with a shared inherited lock\n'
+printf 'PASS: confined paths, byte-for-byte backup, qemu-img content comparison, snapshot rollback, and retained pre-restore data\n'
