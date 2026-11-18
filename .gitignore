@@ -1,0 +1,20 @@
+# VM disks and installer images
+*.qcow2
+*.qcow
+*.img
+*.raw
+*.iso
+/installer/
+
+# Local credentials and secrets
+/credentials.txt
+/vnc-password.txt
+.env
+.env.*
+*.pem
+*.key
+
+# Runtime output
+*.log
+*.pid
+*.sock
